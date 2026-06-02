@@ -499,6 +499,7 @@ func usageMenuItem(label: String, window: RateWindow?) -> NSMenuItem {
     }
     let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
     item.attributedTitle = attributed
+    item.isEnabled = true
     return item
 }
 
@@ -511,6 +512,7 @@ func blackMenuItem(_ title: String) -> NSMenuItem {
             .foregroundColor: NSColor.black
         ]
     )
+    item.isEnabled = true
     return item
 }
 
@@ -566,6 +568,7 @@ final class StatusBarApp: NSObject, NSApplicationDelegate {
 
     private func rebuildMenu() {
         let menu = NSMenu()
+        menu.autoenablesItems = false
         if snapshots.isEmpty {
             menu.addItem(NSMenuItem(title: refreshInFlight ? "Loading..." : "No data yet", action: nil, keyEquivalent: ""))
             menu.addItem(.separator())
@@ -573,7 +576,6 @@ final class StatusBarApp: NSObject, NSApplicationDelegate {
 
         for snapshot in snapshots {
             let title = blackMenuItem([snapshot.name, snapshot.plan].compactMap { $0 }.joined(separator: " · "))
-            title.isEnabled = false
             menu.addItem(title)
             menu.addItem(usageMenuItem(label: "5h", window: snapshot.fiveHour))
             menu.addItem(usageMenuItem(label: "Week", window: snapshot.week))

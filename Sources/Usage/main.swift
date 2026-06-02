@@ -555,6 +555,19 @@ func blackMenuItem(_ title: String, action: Selector? = nil) -> NSMenuItem {
     return item
 }
 
+func grayMenuItem(_ title: String) -> NSMenuItem {
+    let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+    item.attributedTitle = NSAttributedString(
+        string: title,
+        attributes: [
+            .font: NSFont.menuFont(ofSize: 0),
+            .foregroundColor: NSColor.disabledControlTextColor
+        ]
+    )
+    item.isEnabled = true
+    return item
+}
+
 func dateText(_ date: Date?) -> String {
     guard let date else { return "n/a" }
     let formatter = DateFormatter()
@@ -629,7 +642,7 @@ final class StatusBarApp: NSObject, NSApplicationDelegate {
         }
 
         if let lastUpdated {
-            menu.addItem(blackMenuItem("Updated \(dateText(lastUpdated))"))
+            menu.addItem(grayMenuItem("Updated \(dateText(lastUpdated))"))
             menu.addItem(.separator())
         }
         menu.addItem(NSMenuItem(title: refreshInFlight ? "Refreshing..." : "Refresh now", action: #selector(refreshNow), keyEquivalent: "r"))

@@ -69,6 +69,29 @@ func capitalize(_ raw: String) -> String {
         .joined(separator: " ")
 }
 
+func codexPlanName(_ raw: String?) -> String? {
+    guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+        return nil
+    }
+
+    switch raw.lowercased() {
+    case "prolite":
+        return "Pro 5x"
+    case "pro":
+        return "Pro"
+    case "plus":
+        return "Plus"
+    case "free":
+        return "Free"
+    case "team":
+        return "Team"
+    case "enterprise":
+        return "Enterprise"
+    default:
+        return capitalize(raw)
+    }
+}
+
 func requestJSON<T: Decodable>(
     _ type: T.Type,
     request: URLRequest,
@@ -258,7 +281,7 @@ func codexSnapshot(accessToken: String, tokens: CodexTokens) async throws -> Pro
         name: "Codex",
         fiveHour: usage.rateLimit?.primaryWindow?.rateWindow,
         week: usage.rateLimit?.secondaryWindow?.rateWindow,
-        plan: usage.planType.map(capitalize),
+        plan: codexPlanName(usage.planType),
         error: nil
     )
 }

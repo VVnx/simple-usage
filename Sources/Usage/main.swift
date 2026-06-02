@@ -578,8 +578,12 @@ func dateText(_ date: Date?) -> String {
 func countdownText(_ date: Date?) -> String {
     guard let date else { return "n/a" }
     let seconds = max(0, Int(date.timeIntervalSinceNow))
-    let hours = seconds / 3600
+    let days = seconds / 86_400
+    let hours = (seconds % 86_400) / 3600
     let minutes = (seconds % 3600) / 60
+    if days > 0 {
+        return "\(days)d \(hours)h \(minutes)m"
+    }
     if hours > 0 {
         return "\(hours)h \(minutes)m"
     }
@@ -610,11 +614,31 @@ final class StatusBarApp: NSObject, NSApplicationDelegate {
         refreshInFlight = true
         rebuildMenu()
         Task {
-            let snapshots = await collectUsage()
-            self.snapshots = snapshots
+            let fetchedSnapshots = await collectUsage()
+            self.snapshots = self.mergingWithPreviousSuccessfulData(fetchedSnapshots)
             self.lastUpdated = Date()
             self.refreshInFlight = false
             self.rebuildMenu()
+        }
+    }
+
+    private func mergingWithPreviousSuccessfulData(_ fetchedSnapshots: [ProviderSnapshot]) -> [ProviderSnapshot] {
+        let previousByName = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.name, $0) })
+        return fetchedSnapshots.map { fetched in
+            guard let previous = previousByName[fetched.name],
+                  fetched.error != nil,
+                  fetched.fiveHour == nil,
+                  fetched.week == nil else {
+                return fetched
+            }
+            return ProviderSnapshot(
+                name: fetched.name,
+                fiveHour: previous.fiveHour,
+                week: previous.week,
+                plan: previous.plan ?? fetched.plan,
+                usageURL: fetched.usageURL ?? previous.usageURL,
+                error: fetched.error
+            )
         }
     }
 

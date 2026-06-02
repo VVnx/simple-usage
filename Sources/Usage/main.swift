@@ -11,6 +11,7 @@ struct ProviderSnapshot: Sendable {
     let fiveHour: RateWindow?
     let week: RateWindow?
     let plan: String?
+    let usageURL: URL?
     let error: String?
 }
 
@@ -267,7 +268,7 @@ func fetchCodexSnapshot() async -> ProviderSnapshot {
             return try await codexSnapshot(accessToken: accessToken, tokens: tokens)
         }
     } catch {
-        return ProviderSnapshot(name: "Codex", fiveHour: nil, week: nil, plan: nil, error: error.localizedDescription)
+        return ProviderSnapshot(name: "Codex", fiveHour: nil, week: nil, plan: nil, usageURL: codexUsageURL, error: error.localizedDescription)
     }
 }
 
@@ -282,6 +283,7 @@ func codexSnapshot(accessToken: String, tokens: CodexTokens) async throws -> Pro
         fiveHour: usage.rateLimit?.primaryWindow?.rateWindow,
         week: usage.rateLimit?.secondaryWindow?.rateWindow,
         plan: codexPlanName(usage.planType),
+        usageURL: codexUsageURL,
         error: nil
     )
 }
@@ -441,7 +443,7 @@ func fetchClaudeSnapshot() async -> ProviderSnapshot {
             return try await claudeSnapshot(accessToken: accessToken, oauth: oauth)
         }
     } catch {
-        return ProviderSnapshot(name: "Claude", fiveHour: nil, week: nil, plan: nil, error: error.localizedDescription)
+        return ProviderSnapshot(name: "Claude", fiveHour: nil, week: nil, plan: nil, usageURL: claudeUsageURL, error: error.localizedDescription)
     }
 }
 
@@ -456,6 +458,7 @@ func claudeSnapshot(accessToken: String, oauth: ClaudeOAuth) async throws -> Pro
         fiveHour: usage.fiveHour?.rateWindow,
         week: usage.sevenDay?.rateWindow,
         plan: claudePlan(oauth),
+        usageURL: claudeUsageURL,
         error: nil
     )
 }
@@ -468,6 +471,9 @@ extension Optional {
 }
 
 // MARK: - UI
+
+private let codexUsageURL = URL(string: "https://chatgpt.com/codex/cloud/settings/usage")!
+private let claudeUsageURL = URL(string: "https://claude.ai/new#settings/usage")!
 
 func collectUsage() async -> [ProviderSnapshot] {
     async let codex = fetchCodexSnapshot()
@@ -503,7 +509,8 @@ func statusIcon() -> NSImage {
 
 func usageMenuItem(label: String, window: RateWindow?) -> NSMenuItem {
     let percent = percentText(window)
-    let title = "\(label)  \(percent)  reset \(dateText(window?.resetsAt)) (\(countdownText(window?.resetsAt)))"
+    let resetText = "reset \(dateText(window?.resetsAt)) (\(countdownText(window?.resetsAt)))"
+    let title = "\(label)  \(percent)  \(resetText)"
     let attributed = NSMutableAttributedString(
         string: title,
         attributes: [
@@ -511,6 +518,15 @@ func usageMenuItem(label: String, window: RateWindow?) -> NSMenuItem {
             .foregroundColor: NSColor.black
         ]
     )
+    if let range = title.range(of: resetText) {
+        attributed.addAttributes(
+            [
+                .font: NSFont.menuFont(ofSize: 0),
+                .foregroundColor: NSColor.secondaryLabelColor
+            ],
+            range: NSRange(range, in: title)
+        )
+    }
     if let range = title.range(of: percent) {
         attributed.addAttributes(
             [
@@ -526,8 +542,8 @@ func usageMenuItem(label: String, window: RateWindow?) -> NSMenuItem {
     return item
 }
 
-func blackMenuItem(_ title: String) -> NSMenuItem {
-    let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+func blackMenuItem(_ title: String, action: Selector? = nil) -> NSMenuItem {
+    let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
     item.attributedTitle = NSAttributedString(
         string: title,
         attributes: [
@@ -598,7 +614,11 @@ final class StatusBarApp: NSObject, NSApplicationDelegate {
         }
 
         for snapshot in snapshots {
-            let title = blackMenuItem([snapshot.name, snapshot.plan].compactMap { $0 }.joined(separator: " · "))
+            let title = blackMenuItem(
+                [snapshot.name, snapshot.plan].compactMap { $0 }.joined(separator: " · "),
+                action: #selector(openProviderUsage(_:))
+            )
+            title.representedObject = snapshot.usageURL
             menu.addItem(title)
             menu.addItem(usageMenuItem(label: "5h", window: snapshot.fiveHour))
             menu.addItem(usageMenuItem(label: "Week", window: snapshot.week))
@@ -619,6 +639,11 @@ final class StatusBarApp: NSObject, NSApplicationDelegate {
 
     @objc private func refreshNow() {
         refresh()
+    }
+
+    @objc private func openProviderUsage(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        NSWorkspace.shared.open(url)
     }
 
     @objc private func quit() {

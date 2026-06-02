@@ -18,7 +18,7 @@ The menu bar item is intentionally minimal: one `AI` entry. Click it to see the 
 - Codex: reads `~/.codex/auth.json` and calls `https://chatgpt.com/backend-api/wham/usage`
 - Claude: reads `~/.claude/.credentials.json` or the macOS Keychain item `Claude Code-credentials`, then calls `https://api.anthropic.com/api/oauth/usage`
 
-Usage refreshes every minute in the background.
+Usage refreshes every 5 minutes in the background. Use `Command+R` from the menu to refresh manually.
 
 ## Requirements
 

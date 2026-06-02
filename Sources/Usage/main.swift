@@ -604,7 +604,7 @@ final class StatusBarApp: NSObject, NSApplicationDelegate {
         statusItem.button?.imagePosition = .imageOnly
         rebuildMenu()
         refresh()
-        timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 5 * 60, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
     }

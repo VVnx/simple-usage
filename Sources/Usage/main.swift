@@ -574,31 +574,15 @@ func blackMenuItem(_ title: String, action: Selector? = nil) -> NSMenuItem {
     return item
 }
 
-@MainActor
-func grayMenuItem(_ title: String, alignment: NSTextAlignment = .left) -> NSMenuItem {
+func grayMenuItem(_ title: String) -> NSMenuItem {
     let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-    let attributedTitle = NSAttributedString(
+    item.attributedTitle = NSAttributedString(
         string: title,
         attributes: [
             .font: NSFont.menuFont(ofSize: 0),
             .foregroundColor: NSColor.disabledControlTextColor
         ]
     )
-    if alignment == .right {
-        let view = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 22))
-        let label = NSTextField(labelWithAttributedString: attributedTitle)
-        label.frame = NSRect(x: 18, y: 1, width: 292, height: 20)
-        label.alignment = .right
-        label.lineBreakMode = .byTruncatingTail
-        label.backgroundColor = .clear
-        label.isBordered = false
-        label.isEditable = false
-        label.isSelectable = false
-        view.addSubview(label)
-        item.view = view
-    } else {
-        item.attributedTitle = attributedTitle
-    }
     item.isEnabled = true
     return item
 }
@@ -691,7 +675,7 @@ final class StatusBarApp: NSObject, NSApplicationDelegate {
             menu.addItem(usageMenuItem(label: "5h", window: snapshot.fiveHour))
             menu.addItem(usageMenuItem(label: "Week", window: snapshot.week))
             if let updatedAt = snapshot.updatedAt {
-                menu.addItem(grayMenuItem("Updated \(dateText(updatedAt))", alignment: .right))
+                menu.addItem(grayMenuItem("Updated \(dateText(updatedAt))"))
             }
             menu.addItem(.separator())
         }

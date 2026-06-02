@@ -457,6 +457,54 @@ func percentText(_ window: RateWindow?) -> String {
     return "\(String(format: "%.0f", window.usedPercent))%"
 }
 
+func statusIcon() -> NSImage {
+    if let resourceURL = Bundle.main.resourceURL?.appendingPathComponent("usage-icon.png"),
+       let image = NSImage(contentsOf: resourceURL) {
+        image.size = NSSize(width: 18, height: 18)
+        image.isTemplate = true
+        return image
+    }
+
+    let image = NSImage(size: NSSize(width: 18, height: 18))
+    image.lockFocus()
+    NSColor.labelColor.setStroke()
+    NSColor.labelColor.setFill()
+    let ring = NSBezierPath(ovalIn: NSRect(x: 2, y: 2, width: 14, height: 14))
+    ring.lineWidth = 1.8
+    ring.stroke()
+    for (index, height) in [5.0, 8.0, 11.0].enumerated() {
+        let rect = NSRect(x: 5.0 + Double(index) * 3.8, y: 4, width: 2.4, height: height)
+        NSBezierPath(roundedRect: rect, xRadius: 1.0, yRadius: 1.0).fill()
+    }
+    image.unlockFocus()
+    image.isTemplate = true
+    return image
+}
+
+func usageMenuItem(label: String, window: RateWindow?) -> NSMenuItem {
+    let percent = percentText(window)
+    let title = "\(label)  \(percent)  reset \(dateText(window?.resetsAt)) (\(countdownText(window?.resetsAt)))"
+    let attributed = NSMutableAttributedString(
+        string: title,
+        attributes: [
+            .font: NSFont.menuFont(ofSize: 0),
+            .foregroundColor: NSColor.labelColor
+        ]
+    )
+    if let range = title.range(of: percent) {
+        attributed.addAttributes(
+            [
+                .font: NSFont.boldSystemFont(ofSize: NSFont.systemFontSize),
+                .foregroundColor: NSColor.black
+            ],
+            range: NSRange(range, in: title)
+        )
+    }
+    let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+    item.attributedTitle = attributed
+    return item
+}
+
 func dateText(_ date: Date?) -> String {
     guard let date else { return "n/a" }
     let formatter = DateFormatter()
@@ -485,8 +533,8 @@ final class StatusBarApp: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        statusItem.button?.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-        statusItem.button?.title = "AI"
+        statusItem.button?.image = statusIcon()
+        statusItem.button?.imagePosition = .imageOnly
         rebuildMenu()
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
@@ -522,16 +570,8 @@ final class StatusBarApp: NSObject, NSApplicationDelegate {
             )
             title.isEnabled = false
             menu.addItem(title)
-            menu.addItem(NSMenuItem(
-                title: "5h  \(percentText(snapshot.fiveHour))  reset \(dateText(snapshot.fiveHour?.resetsAt)) (\(countdownText(snapshot.fiveHour?.resetsAt)))",
-                action: nil,
-                keyEquivalent: ""
-            ))
-            menu.addItem(NSMenuItem(
-                title: "Week \(percentText(snapshot.week))  reset \(dateText(snapshot.week?.resetsAt)) (\(countdownText(snapshot.week?.resetsAt)))",
-                action: nil,
-                keyEquivalent: ""
-            ))
+            menu.addItem(usageMenuItem(label: "5h", window: snapshot.fiveHour))
+            menu.addItem(usageMenuItem(label: "Week", window: snapshot.week))
             if let error = snapshot.error {
                 menu.addItem(NSMenuItem(title: "Error: \(error)", action: nil, keyEquivalent: ""))
             }
@@ -540,6 +580,7 @@ final class StatusBarApp: NSObject, NSApplicationDelegate {
 
         if let lastUpdated {
             menu.addItem(NSMenuItem(title: "Updated \(dateText(lastUpdated))", action: nil, keyEquivalent: ""))
+            menu.addItem(.separator())
         }
         menu.addItem(NSMenuItem(title: refreshInFlight ? "Refreshing..." : "Refresh now", action: #selector(refreshNow), keyEquivalent: "r"))
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))

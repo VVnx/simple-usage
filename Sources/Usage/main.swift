@@ -522,7 +522,7 @@ func usageMenuItem(label: String, window: RateWindow?) -> NSMenuItem {
         attributed.addAttributes(
             [
                 .font: NSFont.menuFont(ofSize: 0),
-                .foregroundColor: NSColor.secondaryLabelColor
+                .foregroundColor: NSColor.disabledControlTextColor
             ],
             range: NSRange(range, in: title)
         )

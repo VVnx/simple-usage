@@ -1,24 +1,25 @@
 # Usage
 
-A tiny macOS menu bar app that shows only Codex and Claude usage.
+A tiny macOS status bar app for Codex and Claude usage.
 
-Usage keeps the essentials visible: 5-hour limits, weekly limits, and reset times for Codex and Claude. No dashboards, no extra providers, no settings clutter.
+Usage shows only the essentials: 5-hour usage, weekly usage, reset times, and the last successful update time for Codex and Claude. No dashboards, no extra providers, no settings clutter.
 
-## What It Shows
+![Usage screenshot](docs/screenshot.png)
 
-- Codex 5-hour usage percentage and reset time
-- Codex weekly usage percentage and reset time
-- Claude 5-hour usage percentage and reset time
-- Claude weekly usage percentage and reset time
+## Features
 
-The menu bar item is intentionally minimal: one `AI` entry. Click it to see the details.
+- Codex 5-hour and weekly usage percentages
+- Claude 5-hour and weekly usage percentages
+- Reset times with day/hour/minute countdowns
+- Separate last-updated timestamps for Codex and Claude
+- Background refresh every 5 minutes
+- Manual refresh with `Command+R`
+- Quick links to the Codex and Claude usage pages
 
 ## Data Sources
 
 - Codex: reads `~/.codex/auth.json` and calls `https://chatgpt.com/backend-api/wham/usage`
 - Claude: reads `~/.claude/.credentials.json` or the macOS Keychain item `Claude Code-credentials`, then calls `https://api.anthropic.com/api/oauth/usage`
-
-Usage refreshes every 5 minutes in the background. Use `Command+R` from the menu to refresh manually.
 
 ## Requirements
 
@@ -26,7 +27,7 @@ Usage refreshes every 5 minutes in the background. Use `Command+R` from the menu
 - Swift 6 or newer to build from source
 - Logged-in Codex CLI and Claude Code accounts
 
-## Build
+## Build Locally
 
 ```bash
 ./build_app.sh
@@ -34,3 +35,13 @@ open Usage.app
 ```
 
 The build script creates an ad-hoc signed `Usage.app` in the repository root.
+
+## Easiest Way To Use
+
+Download this project locally, open it with Codex, and ask Codex to build and run the app for you:
+
+```text
+Build this project, create Usage.app, and run it.
+```
+
+Codex can run the included `build_app.sh` script and open the generated app.

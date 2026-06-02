@@ -45,3 +45,7 @@ Build this project, create Usage.app, and run it.
 ```
 
 Codex can run the included `build_app.sh` script and open the generated app.
+
+## License
+
+MIT

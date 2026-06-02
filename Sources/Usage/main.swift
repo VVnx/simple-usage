@@ -12,6 +12,7 @@ struct ProviderSnapshot: Sendable {
     let week: RateWindow?
     let plan: String?
     let usageURL: URL?
+    let updatedAt: Date?
     let error: String?
 }
 
@@ -268,7 +269,15 @@ func fetchCodexSnapshot() async -> ProviderSnapshot {
             return try await codexSnapshot(accessToken: accessToken, tokens: tokens)
         }
     } catch {
-        return ProviderSnapshot(name: "Codex", fiveHour: nil, week: nil, plan: nil, usageURL: codexUsageURL, error: error.localizedDescription)
+        return ProviderSnapshot(
+            name: "Codex",
+            fiveHour: nil,
+            week: nil,
+            plan: nil,
+            usageURL: codexUsageURL,
+            updatedAt: nil,
+            error: error.localizedDescription
+        )
     }
 }
 
@@ -284,6 +293,7 @@ func codexSnapshot(accessToken: String, tokens: CodexTokens) async throws -> Pro
         week: usage.rateLimit?.secondaryWindow?.rateWindow,
         plan: codexPlanName(usage.planType),
         usageURL: codexUsageURL,
+        updatedAt: Date(),
         error: nil
     )
 }
@@ -443,7 +453,15 @@ func fetchClaudeSnapshot() async -> ProviderSnapshot {
             return try await claudeSnapshot(accessToken: accessToken, oauth: oauth)
         }
     } catch {
-        return ProviderSnapshot(name: "Claude", fiveHour: nil, week: nil, plan: nil, usageURL: claudeUsageURL, error: error.localizedDescription)
+        return ProviderSnapshot(
+            name: "Claude",
+            fiveHour: nil,
+            week: nil,
+            plan: nil,
+            usageURL: claudeUsageURL,
+            updatedAt: nil,
+            error: error.localizedDescription
+        )
     }
 }
 
@@ -459,6 +477,7 @@ func claudeSnapshot(accessToken: String, oauth: ClaudeOAuth) async throws -> Pro
         week: usage.sevenDay?.rateWindow,
         plan: claudePlan(oauth),
         usageURL: claudeUsageURL,
+        updatedAt: Date(),
         error: nil
     )
 }
@@ -596,7 +615,6 @@ final class StatusBarApp: NSObject, NSApplicationDelegate {
     private var timer: Timer?
     private var snapshots: [ProviderSnapshot] = []
     private var refreshInFlight = false
-    private var lastUpdated: Date?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -616,7 +634,6 @@ final class StatusBarApp: NSObject, NSApplicationDelegate {
         Task {
             let fetchedSnapshots = await collectUsage()
             self.snapshots = self.mergingWithPreviousSuccessfulData(fetchedSnapshots)
-            self.lastUpdated = Date()
             self.refreshInFlight = false
             self.rebuildMenu()
         }
@@ -625,19 +642,17 @@ final class StatusBarApp: NSObject, NSApplicationDelegate {
     private func mergingWithPreviousSuccessfulData(_ fetchedSnapshots: [ProviderSnapshot]) -> [ProviderSnapshot] {
         let previousByName = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.name, $0) })
         return fetchedSnapshots.map { fetched in
-            guard let previous = previousByName[fetched.name],
-                  fetched.error != nil,
-                  fetched.fiveHour == nil,
-                  fetched.week == nil else {
+            guard fetched.error != nil else {
                 return fetched
             }
-            return ProviderSnapshot(
+            return previousByName[fetched.name] ?? ProviderSnapshot(
                 name: fetched.name,
-                fiveHour: previous.fiveHour,
-                week: previous.week,
-                plan: previous.plan ?? fetched.plan,
-                usageURL: fetched.usageURL ?? previous.usageURL,
-                error: fetched.error
+                fiveHour: fetched.fiveHour,
+                week: fetched.week,
+                plan: fetched.plan,
+                usageURL: fetched.usageURL,
+                updatedAt: nil,
+                error: nil
             )
         }
     }
@@ -659,16 +674,12 @@ final class StatusBarApp: NSObject, NSApplicationDelegate {
             menu.addItem(title)
             menu.addItem(usageMenuItem(label: "5h", window: snapshot.fiveHour))
             menu.addItem(usageMenuItem(label: "Week", window: snapshot.week))
-            if let error = snapshot.error {
-                menu.addItem(NSMenuItem(title: "Error: \(error)", action: nil, keyEquivalent: ""))
+            if let updatedAt = snapshot.updatedAt {
+                menu.addItem(grayMenuItem("Updated \(dateText(updatedAt))"))
             }
             menu.addItem(.separator())
         }
 
-        if let lastUpdated {
-            menu.addItem(grayMenuItem("Updated \(dateText(lastUpdated))"))
-            menu.addItem(.separator())
-        }
         menu.addItem(NSMenuItem(title: refreshInFlight ? "Refreshing..." : "Refresh now", action: #selector(refreshNow), keyEquivalent: "r"))
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
         statusItem.menu = menu

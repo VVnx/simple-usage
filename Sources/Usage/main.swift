@@ -469,9 +469,6 @@ func statusIcon() -> NSImage {
     image.lockFocus()
     NSColor.labelColor.setStroke()
     NSColor.labelColor.setFill()
-    let ring = NSBezierPath(ovalIn: NSRect(x: 2, y: 2, width: 14, height: 14))
-    ring.lineWidth = 1.8
-    ring.stroke()
     for (index, height) in [5.0, 8.0, 11.0].enumerated() {
         let rect = NSRect(x: 5.0 + Double(index) * 3.8, y: 4, width: 2.4, height: height)
         NSBezierPath(roundedRect: rect, xRadius: 1.0, yRadius: 1.0).fill()
@@ -488,7 +485,7 @@ func usageMenuItem(label: String, window: RateWindow?) -> NSMenuItem {
         string: title,
         attributes: [
             .font: NSFont.menuFont(ofSize: 0),
-            .foregroundColor: NSColor.labelColor
+            .foregroundColor: NSColor.black
         ]
     )
     if let range = title.range(of: percent) {
@@ -502,6 +499,18 @@ func usageMenuItem(label: String, window: RateWindow?) -> NSMenuItem {
     }
     let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
     item.attributedTitle = attributed
+    return item
+}
+
+func blackMenuItem(_ title: String) -> NSMenuItem {
+    let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+    item.attributedTitle = NSAttributedString(
+        string: title,
+        attributes: [
+            .font: NSFont.menuFont(ofSize: 0),
+            .foregroundColor: NSColor.black
+        ]
+    )
     return item
 }
 
@@ -563,11 +572,7 @@ final class StatusBarApp: NSObject, NSApplicationDelegate {
         }
 
         for snapshot in snapshots {
-            let title = NSMenuItem(
-                title: [snapshot.name, snapshot.plan].compactMap { $0 }.joined(separator: " · "),
-                action: nil,
-                keyEquivalent: ""
-            )
+            let title = blackMenuItem([snapshot.name, snapshot.plan].compactMap { $0 }.joined(separator: " · "))
             title.isEnabled = false
             menu.addItem(title)
             menu.addItem(usageMenuItem(label: "5h", window: snapshot.fiveHour))
@@ -579,7 +584,7 @@ final class StatusBarApp: NSObject, NSApplicationDelegate {
         }
 
         if let lastUpdated {
-            menu.addItem(NSMenuItem(title: "Updated \(dateText(lastUpdated))", action: nil, keyEquivalent: ""))
+            menu.addItem(blackMenuItem("Updated \(dateText(lastUpdated))"))
             menu.addItem(.separator())
         }
         menu.addItem(NSMenuItem(title: refreshInFlight ? "Refreshing..." : "Refresh now", action: #selector(refreshNow), keyEquivalent: "r"))

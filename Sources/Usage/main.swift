@@ -27,6 +27,9 @@ enum UsageError: Error, LocalizedError {
         case .missingCredentials(let message), .invalidCredentials(let message), .process(let message):
             return message
         case .http(let provider, let status):
+            if status == 429 {
+                return "\(provider) rate limited (HTTP 429)"
+            }
             return "\(provider) usage request failed (HTTP \(status))"
         }
     }
@@ -310,6 +313,8 @@ struct ClaudeCredentials: Codable {
 struct ClaudeOAuth: Codable {
     var accessToken: String?
     var refreshToken: String?
+    var expiresAt: Double?
+    var scopes: [String]?
     var subscriptionType: String?
     var rateLimitTier: String?
 }
@@ -317,11 +322,26 @@ struct ClaudeOAuth: Codable {
 struct ClaudeRefreshResponse: Decodable {
     let accessToken: String?
     let refreshToken: String?
+    let expiresIn: Double?
 
     enum CodingKeys: String, CodingKey {
         case accessToken = "access_token"
         case refreshToken = "refresh_token"
+        case expiresIn = "expires_in"
     }
+
+    // The token endpoint returns a lifetime in seconds; convert it to the same
+    // absolute epoch-milliseconds form Claude Code stores in `expiresAt`.
+    var expiresAt: Double? {
+        guard let expiresIn else { return nil }
+        return Date().timeIntervalSince1970 * 1000 + expiresIn * 1000
+    }
+}
+
+// Treat a token as expired a minute early to avoid a refresh racing the clock.
+func claudeTokenExpired(_ oauth: ClaudeOAuth) -> Bool {
+    guard let expiresAt = oauth.expiresAt else { return false }
+    return Date().timeIntervalSince1970 * 1000 >= expiresAt - 60_000
 }
 
 struct ClaudeUsageResponse: Decodable {
@@ -376,24 +396,37 @@ func claudeCredentialsPath() -> URL {
 }
 
 func readClaudeCredentials() throws -> ClaudeCredentials {
-    let path = claudeCredentialsPath()
-    if FileManager.default.fileExists(atPath: path.path) {
-        return try JSONDecoder().decode(ClaudeCredentials.self, from: Data(contentsOf: path))
+    // Read both stores Claude credentials can live in. On macOS the Keychain is
+    // the canonical source Claude Code keeps fresh; the JSON file is a cache this
+    // app may have written on a previous refresh. Either can be the stale one, so
+    // we pick whichever holds the later-expiring token instead of blindly
+    // preferring the file (which would shadow a token Claude Code has rotated).
+    var candidates: [ClaudeCredentials] = []
+    if let raw = try? readKeychainPassword(service: "Claude Code-credentials"),
+       let creds = try? JSONDecoder().decode(ClaudeCredentials.self, from: Data(raw.utf8)) {
+        candidates.append(creds)
     }
-    let raw = try readKeychainPassword(service: "Claude Code-credentials")
-    return try JSONDecoder().decode(ClaudeCredentials.self, from: Data(raw.utf8))
+    let path = claudeCredentialsPath()
+    if FileManager.default.fileExists(atPath: path.path),
+       let data = try? Data(contentsOf: path),
+       let creds = try? JSONDecoder().decode(ClaudeCredentials.self, from: data) {
+        candidates.append(creds)
+    }
+    guard let best = candidates.max(by: {
+        ($0.claudeAiOauth?.expiresAt ?? 0) < ($1.claudeAiOauth?.expiresAt ?? 0)
+    }) else {
+        throw UsageError.missingCredentials("No Claude credentials found")
+    }
+    return best
 }
 
 func saveClaudeCredentials(_ oauth: ClaudeOAuth) {
-    let payload: [String: Any] = [
-        "claudeAiOauth": [
-            "accessToken": oauth.accessToken ?? "",
-            "refreshToken": oauth.refreshToken ?? "",
-            "subscriptionType": oauth.subscriptionType ?? "",
-            "rateLimitTier": oauth.rateLimitTier ?? ""
-        ]
-    ]
-    if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]) {
+    // Encode the whole struct so every field round-trips — notably `expiresAt` and
+    // `scopes`, which the previous hand-built dictionary dropped. Losing `expiresAt`
+    // is what left the cached token un-refreshable and stuck behind 429s.
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    if let data = try? encoder.encode(ClaudeCredentials(claudeAiOauth: oauth)) {
         writeSecretJSON(data, to: claudeCredentialsPath())
     }
 }
@@ -441,6 +474,19 @@ func fetchClaudeSnapshot() async -> ProviderSnapshot {
         var oauth = try credentials.claudeAiOauth.unwrap("No Claude OAuth credentials")
         var accessToken = try oauth.accessToken.unwrap("No Claude access token")
 
+        // Refresh proactively when the token is already expired: the usage endpoint
+        // answers an expired token with 429, not 401, so the reactive path below
+        // would never fire and the app would stay stuck rate-limited.
+        if claudeTokenExpired(oauth), let refreshToken = oauth.refreshToken,
+           let refreshed = try? await refreshClaudeToken(refreshToken),
+           let newAccess = refreshed.accessToken {
+            accessToken = newAccess
+            oauth.accessToken = newAccess
+            oauth.refreshToken = refreshed.refreshToken ?? oauth.refreshToken
+            oauth.expiresAt = refreshed.expiresAt ?? oauth.expiresAt
+            saveClaudeCredentials(oauth)
+        }
+
         do {
             return try await claudeSnapshot(accessToken: accessToken, oauth: oauth)
         } catch UsageError.http(_, let status) where status == 401 || status == 403 {
@@ -449,6 +495,7 @@ func fetchClaudeSnapshot() async -> ProviderSnapshot {
             accessToken = try refreshed.accessToken.unwrap("Claude refresh returned no access token")
             oauth.accessToken = accessToken
             oauth.refreshToken = refreshed.refreshToken ?? oauth.refreshToken
+            oauth.expiresAt = refreshed.expiresAt ?? oauth.expiresAt
             saveClaudeCredentials(oauth)
             return try await claudeSnapshot(accessToken: accessToken, oauth: oauth)
         }

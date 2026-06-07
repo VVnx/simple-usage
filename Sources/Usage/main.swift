@@ -63,7 +63,11 @@ func parseAPIDate(_ raw: String?) -> Date? {
 
 func normalizedPercent(_ value: Double) -> Double {
     let percent = value <= 1.0 ? value * 100.0 : value
-    return min(100.0, max(0.0, percent))
+    return clampedPercent(percent)
+}
+
+func clampedPercent(_ value: Double) -> Double {
+    min(100.0, max(0.0, value))
 }
 
 func capitalize(_ raw: String) -> String {
@@ -188,8 +192,9 @@ struct CodexWindow: Decodable {
     }
 
     var rateWindow: RateWindow {
+        // Codex returns used_percent as 0...100, while Claude utilization may be 0...1.
         RateWindow(
-            usedPercent: normalizedPercent(usedPercent ?? 0),
+            usedPercent: clampedPercent(usedPercent ?? 0),
             resetsAt: resetAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
         )
     }

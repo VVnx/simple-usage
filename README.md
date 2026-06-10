@@ -1,10 +1,12 @@
-# Usage
+# Usage — Claude Code & Codex usage monitor in the macOS menu bar
 
-A tiny macOS status bar app for Codex and Claude usage.
+A tiny macOS menu bar app that tracks your **Claude Code** (Anthropic) and **OpenAI Codex** usage and rate limits at a glance: 5-hour and weekly quota percentages, reset countdowns, and last-update times. No dashboards, no extra providers, no settings clutter.
 
-Usage shows only the essentials: 5-hour usage, weekly usage, reset times, and the last successful update time for Codex and Claude. No dashboards, no extra providers, no settings clutter.
+![Claude Code and Codex usage and rate limits in the macOS menu bar](docs/screenshot.png)
 
-![Usage screenshot](docs/screenshot.png)
+## Why
+
+If you use the Codex CLI or Claude Code on a Plus / Pro / Max plan, you work against 5-hour and weekly rate limits. Checking them means opening a web dashboard or running CLI commands. Usage keeps those numbers one click away in the status bar, refreshed automatically.
 
 ## Features
 
@@ -15,6 +17,7 @@ Usage shows only the essentials: 5-hour usage, weekly usage, reset times, and th
 - Background refresh every 5 minutes
 - Manual refresh with `Command+R`
 - Quick links to the Codex and Claude usage pages
+- Native Swift + AppKit — no Electron, negligible memory footprint
 
 ## Data Sources
 
@@ -38,13 +41,28 @@ The build script creates an ad-hoc signed `Usage.app` in the repository root.
 
 ## Easiest Way To Use
 
-Download this project locally, open it with Codex, and ask Codex to build and run the app for you:
+Download this project locally, open it with Codex or Claude Code, and ask the agent to build and run the app for you:
 
 ```text
 Build this project, create Usage.app, and run it.
 ```
 
-Codex can run the included `build_app.sh` script and open the generated app.
+The agent can run the included `build_app.sh` script and open the generated app.
+
+## FAQ
+
+**How do I check my Claude Code usage and rate limits on macOS?**
+Run Usage — it reads your existing Claude Code login (macOS Keychain or `~/.claude/.credentials.json`) and shows the 5-hour and weekly limit percentages plus reset countdowns in the menu bar.
+
+**How do I check my Codex usage?**
+Usage reads `~/.codex/auth.json` from a logged-in Codex CLI and shows the same 5-hour and weekly windows for Codex.
+
+**Does it send my credentials anywhere?**
+No. Tokens are read locally and used only to call the official usage endpoints at `chatgpt.com` and `api.anthropic.com`.
+
+## 简体中文
+
+Usage 是一个轻量的 macOS 菜单栏应用，用来实时查看 Claude Code 和 OpenAI Codex 的用量与速率限制（rate limit）：5 小时 / 每周配额百分比、重置倒计时、最近更新时间。本地读取已登录 CLI 的凭证，只请求官方用量接口，无需额外配置。
 
 ## License
 

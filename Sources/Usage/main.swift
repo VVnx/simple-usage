@@ -61,11 +61,6 @@ func parseAPIDate(_ raw: String?) -> Date? {
         ?? longFractionFormatter.date(from: raw)
 }
 
-func normalizedPercent(_ value: Double) -> Double {
-    let percent = value <= 1.0 ? value * 100.0 : value
-    return clampedPercent(percent)
-}
-
 func clampedPercent(_ value: Double) -> Double {
     min(100.0, max(0.0, value))
 }
@@ -192,7 +187,7 @@ struct CodexWindow: Decodable {
     }
 
     var rateWindow: RateWindow {
-        // Codex returns used_percent as 0...100, while Claude utilization may be 0...1.
+        // used_percent is already on a 0...100 scale.
         RateWindow(
             usedPercent: clampedPercent(usedPercent ?? 0),
             resetsAt: resetAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
@@ -359,6 +354,20 @@ struct ClaudeUsageResponse: Decodable {
     }
 }
 
+struct ClaudeProfileResponse: Decodable {
+    struct Organization: Decodable {
+        let organizationType: String?
+        let rateLimitTier: String?
+
+        enum CodingKeys: String, CodingKey {
+            case organizationType = "organization_type"
+            case rateLimitTier = "rate_limit_tier"
+        }
+    }
+
+    let organization: Organization?
+}
+
 struct ClaudeWindow: Decodable {
     let utilization: Double
     let resetsAt: String?
@@ -369,7 +378,9 @@ struct ClaudeWindow: Decodable {
     }
 
     var rateWindow: RateWindow {
-        RateWindow(usedPercent: normalizedPercent(utilization), resetsAt: parseAPIDate(resetsAt))
+        // utilization is already a 0...100 percentage (9.0 == 9%); rescaling
+        // values <= 1.0 as fractions used to turn 1% into 100%.
+        RateWindow(usedPercent: clampedPercent(utilization), resetsAt: parseAPIDate(resetsAt))
     }
 }
 
@@ -446,6 +457,15 @@ func claudeUsageRequest(accessToken: String) -> URLRequest {
     return request
 }
 
+func claudeProfileRequest(accessToken: String) -> URLRequest {
+    var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/profile")!)
+    request.timeoutInterval = 15
+    request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+    request.setValue(claudeBetaHeader, forHTTPHeaderField: "anthropic-beta")
+    return request
+}
+
 func refreshClaudeToken(_ refreshToken: String) async throws -> ClaudeRefreshResponse {
     var request = URLRequest(url: URL(string: "https://platform.claude.com/v1/oauth/token")!)
     request.httpMethod = "POST"
@@ -461,14 +481,30 @@ func refreshClaudeToken(_ refreshToken: String) async throws -> ClaudeRefreshRes
     return try await requestJSON(ClaudeRefreshResponse.self, request: request, provider: "Claude token refresh")
 }
 
-func claudePlan(_ oauth: ClaudeOAuth) -> String? {
-    guard let subscription = oauth.subscriptionType, !subscription.isEmpty else { return nil }
-    let tier = oauth.rateLimitTier?
+// The credential stores keep whatever subscription metadata existed at login and
+// are not rewritten when the plan changes, so the live profile endpoint is the
+// only reliable source; cached metadata is just the offline fallback.
+func claudePlan(profile: ClaudeProfileResponse?, oauth: ClaudeOAuth) -> String? {
+    if let organization = profile?.organization,
+       let plan = claudePlanName(subscription: organization.organizationType, tier: organization.rateLimitTier) {
+        return plan
+    }
+    return claudePlanName(subscription: oauth.subscriptionType, tier: oauth.rateLimitTier)
+}
+
+func claudePlanName(subscription: String?, tier: String?) -> String? {
+    guard var subscription = subscription?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !subscription.isEmpty else { return nil }
+    // Profile reports "claude_max" where the credentials store just "max".
+    if subscription.lowercased().hasPrefix("claude_") {
+        subscription = String(subscription.dropFirst("claude_".count))
+    }
+    let tierSuffix = tier?
         .split(separator: "_")
         .last
         .map(String.init)
-    if let tier, !tier.isEmpty {
-        return "\(capitalize(subscription)) \(tier)"
+    if let tierSuffix, !tierSuffix.isEmpty {
+        return "\(capitalize(subscription)) \(tierSuffix)"
     }
     return capitalize(subscription)
 }
@@ -518,16 +554,22 @@ func fetchClaudeSnapshot() async -> ProviderSnapshot {
 }
 
 func claudeSnapshot(accessToken: String, oauth: ClaudeOAuth) async throws -> ProviderSnapshot {
+    async let profileFetch = try? requestJSON(
+        ClaudeProfileResponse.self,
+        request: claudeProfileRequest(accessToken: accessToken),
+        provider: "Claude profile"
+    )
     let usage = try await requestJSON(
         ClaudeUsageResponse.self,
         request: claudeUsageRequest(accessToken: accessToken),
         provider: "Claude"
     )
+    let profile = await profileFetch
     return ProviderSnapshot(
         name: "Claude",
         fiveHour: usage.fiveHour?.rateWindow,
         week: usage.sevenDay?.rateWindow,
-        plan: claudePlan(oauth),
+        plan: claudePlan(profile: profile, oauth: oauth),
         usageURL: claudeUsageURL,
         updatedAt: Date(),
         error: nil
@@ -661,27 +703,190 @@ func countdownText(_ date: Date?) -> String {
     return "\(minutes)m"
 }
 
+// A menu row backed by a custom view: clicking it runs `onClick` without
+// dismissing the menu, which a regular NSMenuItem action cannot do.
 @MainActor
-final class StatusBarApp: NSObject, NSApplicationDelegate {
+private final class MenuActionRowView: NSView {
+    private let highlight: NSVisualEffectView = {
+        let view = NSVisualEffectView()
+        view.material = .selection
+        view.state = .active
+        view.isEmphasized = true
+        view.blendingMode = .behindWindow
+        view.wantsLayer = true
+        view.layer?.cornerRadius = 4
+        view.isHidden = true
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
+    }()
+
+    private let label: NSTextField = {
+        let field = NSTextField(labelWithString: "")
+        field.font = NSFont.menuFont(ofSize: 0)
+        field.translatesAutoresizingMaskIntoConstraints = false
+        return field
+    }()
+
+    // The view replaces the whole row, so the key equivalent AppKit would
+    // normally draw has to be rendered by hand.
+    private let shortcutLabel: NSTextField = {
+        let field = NSTextField(labelWithString: "")
+        field.font = NSFont.menuFont(ofSize: 0)
+        field.translatesAutoresizingMaskIntoConstraints = false
+        return field
+    }()
+
+    var onClick: (() -> Void)?
+    private var isHighlighted = false
+
+    var title: String {
+        get { label.stringValue }
+        set { label.stringValue = newValue }
+    }
+
+    var shortcutHint: String {
+        get { shortcutLabel.stringValue }
+        set { shortcutLabel.stringValue = newValue }
+    }
+
+    var isActionEnabled = true {
+        didSet {
+            if !isActionEnabled {
+                setHighlighted(false)
+            }
+            applyLabelColor()
+        }
+    }
+
+    init() {
+        super.init(frame: NSRect(x: 0, y: 0, width: 220, height: 22))
+        autoresizingMask = [.width]
+        addSubview(highlight)
+        addSubview(label)
+        addSubview(shortcutLabel)
+        NSLayoutConstraint.activate([
+            highlight.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 5),
+            highlight.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -5),
+            highlight.topAnchor.constraint(equalTo: topAnchor),
+            highlight.bottomAnchor.constraint(equalTo: bottomAnchor),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: shortcutLabel.leadingAnchor, constant: -12),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            shortcutLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            shortcutLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+        applyLabelColor()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self
+        ))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        if isActionEnabled {
+            setHighlighted(true)
+        }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        setHighlighted(false)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard isActionEnabled else { return }
+        onClick?()
+    }
+
+    private func setHighlighted(_ highlighted: Bool) {
+        isHighlighted = highlighted
+        highlight.isHidden = !highlighted
+        applyLabelColor()
+    }
+
+    private func applyLabelColor() {
+        if !isActionEnabled {
+            label.textColor = .disabledControlTextColor
+            shortcutLabel.textColor = .disabledControlTextColor
+        } else if isHighlighted {
+            label.textColor = .selectedMenuItemTextColor
+            shortcutLabel.textColor = .selectedMenuItemTextColor
+        } else {
+            label.textColor = .labelColor
+            shortcutLabel.textColor = .secondaryLabelColor
+        }
+    }
+}
+
+@MainActor
+final class StatusBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let menu = NSMenu()
+    private let refreshView = MenuActionRowView()
+    private lazy var refreshItem: NSMenuItem = {
+        let item = NSMenuItem(title: "Refresh now", action: #selector(refreshNow), keyEquivalent: "r")
+        item.target = self
+        refreshView.shortcutHint = "⌘R"
+        item.view = refreshView
+        return item
+    }()
     private var timer: Timer?
     private var snapshots: [ProviderSnapshot] = []
     private var refreshInFlight = false
+    private var lastRefreshStarted: Date?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         statusItem.button?.image = statusIcon()
         statusItem.button?.imagePosition = .imageOnly
+        menu.autoenablesItems = false
+        menu.delegate = self
+        statusItem.menu = menu
+        refreshView.onClick = { [weak self] in self?.refresh() }
         rebuildMenu()
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 5 * 60, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(systemDidWake),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        // Timers do not fire while the Mac sleeps, so data can be hours old when
+        // the menu opens; rebuild regardless so countdowns reflect "now".
+        if let lastRefreshStarted, Date().timeIntervalSince(lastRefreshStarted) < 60 {
+            rebuildMenu()
+        } else {
+            refresh()
+        }
+    }
+
+    @objc private func systemDidWake() {
+        // Give the network a moment to come back before fetching.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            self?.refresh()
         }
     }
 
     private func refresh() {
         guard !refreshInFlight else { return }
         refreshInFlight = true
+        lastRefreshStarted = Date()
         rebuildMenu()
         Task {
             let fetchedSnapshots = await collectUsage()
@@ -709,9 +914,11 @@ final class StatusBarApp: NSObject, NSApplicationDelegate {
         }
     }
 
+    // Mutates the persistent menu in place: replacing `statusItem.menu` would
+    // leave an already-open menu showing stale rows, while in-place updates are
+    // redrawn live, so a user keeping the menu open sees the refresh land.
     private func rebuildMenu() {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
+        menu.removeAllItems()
         if snapshots.isEmpty {
             menu.addItem(NSMenuItem(title: refreshInFlight ? "Loading..." : "No data yet", action: nil, keyEquivalent: ""))
             menu.addItem(.separator())
@@ -722,6 +929,7 @@ final class StatusBarApp: NSObject, NSApplicationDelegate {
                 [snapshot.name, snapshot.plan].compactMap { $0 }.joined(separator: " · "),
                 action: #selector(openProviderUsage(_:))
             )
+            title.target = self
             title.representedObject = snapshot.usageURL
             menu.addItem(title)
             menu.addItem(usageMenuItem(label: "5h", window: snapshot.fiveHour))
@@ -732,9 +940,10 @@ final class StatusBarApp: NSObject, NSApplicationDelegate {
             menu.addItem(.separator())
         }
 
-        menu.addItem(NSMenuItem(title: refreshInFlight ? "Refreshing..." : "Refresh now", action: #selector(refreshNow), keyEquivalent: "r"))
+        refreshView.title = refreshInFlight ? "Refreshing..." : "Refresh now"
+        refreshView.isActionEnabled = !refreshInFlight
+        menu.addItem(refreshItem)
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
-        statusItem.menu = menu
     }
 
     @objc private func refreshNow() {
